@@ -27,8 +27,11 @@ class Session:
     def path(self) -> Path:
         return VAR_DIR / "sessions" / f"{safe_id(self.id)}.json"
 
-    def add(self, role: str, text: str) -> None:
-        self.history.append({"role": role, "text": text})
+    def add(self, role: str, text: str, notes: str = "") -> None:
+        entry = {"role": role, "text": text}
+        if notes:
+            entry["notes"] = notes  # internal context for the model (ids seen); never printed
+        self.history.append(entry)
 
     def window(self) -> list[dict]:
         return self.history[-HISTORY_WINDOW:]

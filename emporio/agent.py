@@ -36,7 +36,10 @@ class Turn:
 class Agent:
     def __init__(self, store: Store, session: Session, client: genai.Client | None = None, policies: PolicyIndex | None = None):
         self.store, self.session = store, session
-        self.client = client or genai.Client()  # reads GEMINI_API_KEY / GOOGLE_API_KEY
+        # Reads GEMINI_API_KEY / GOOGLE_API_KEY. SDK-internal retries are capped at 1 attempt: we do our own
+        # fallback across models, which recovers much faster than waiting on an overloaded one.
+        self.client = client or genai.Client(http_options=types.HttpOptions(
+            timeout=60_000, retry_options=types.HttpRetryOptions(attempts=1)))
         self.tools = Tools(store, policies or PolicyIndex(), session)
         self._fns = {f.__name__: f for f in self.tools.as_functions()}
 
@@ -47,18 +50,27 @@ class Agent:
             tools=self.tools.as_functions(),
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             temperature=0.3,
+            # "low" thinking is ~4x faster than default with the same answer quality on this task
+            # (measured: 7s vs 30s for a catalogue question). Override with GEMINI_THINKING.
+            thinking_config=types.ThinkingConfig(thinking_level=config.thinking_level()),
         )
 
     def _generate(self, contents: list[types.Content], cfg: types.GenerateContentConfig):
         """Call the model, retrying transient errors (free tier returns 429/503 under load)."""
-        for attempt in range(4):
-            try:
-                return self.client.models.generate_content(model=config.model_name(), contents=contents, config=cfg)
-            except errors.APIError as e:
-                transient = getattr(e, "code", None) in (429, 500, 503, 504)
-                if not transient or attempt == 3:
-                    raise
-                time.sleep(2 ** attempt * 2)
+        last: Exception | None = None
+        for model in config.model_chain():
+            for attempt in range(2):
+                try:
+                    return self.client.models.generate_content(model=model, contents=contents, config=cfg)
+                except errors.APIError as e:
+                    # 404 = model retired for this key, 429/5xx = quota or overload -> try the next one
+                    if getattr(e, "code", None) not in (404, 429, 500, 503, 504):
+                        raise
+                    last = e
+                    if getattr(e, "code", None) == 404:
+                        break
+                    time.sleep(1.5 * (attempt + 1))
+        raise last  # type: ignore[misc]
 
     def _run_tool(self, name: str, args: dict[str, Any]) -> dict:
         fn = self._fns.get(name)
@@ -71,7 +83,11 @@ class Agent:
 
     # ------------------------------------------------------------------ conversation
     def reply(self, user_text: str) -> Turn:
-        contents = [types.Content(role=m["role"], parts=[types.Part(text=m["text"])]) for m in self.session.window()]
+        contents = [
+            types.Content(role=m["role"], parts=[types.Part(text=m["text"] + (
+                f"\n[internal notes, never show to the customer: {m['notes']}]" if m.get("notes") else ""))])
+            for m in self.session.window()
+        ]
         contents.append(types.Content(role="user", parts=[types.Part(text=user_text)]))
         cfg, calls, text = self._config(), [], ""
 
@@ -95,6 +111,38 @@ class Agent:
 
         text = text or FALLBACK
         self.session.add("user", user_text)
-        self.session.add("model", text)
+        self.session.add("model", text, notes=_memo(calls))
         self.session.save()
         return Turn(text, calls)
+
+
+def _memo(calls: list[dict]) -> str:
+    """Compact internal notes of what the tools returned this turn (product ids, orders).
+
+    The chat history only stores plain text, so without this the model forgets ids like
+    'product 89' between turns and has to search again. Notes are sent back to the model
+    but never shown to the customer.
+    """
+    products: dict[int, str] = {}
+    orders: set[int] = set()
+
+    def walk(node):
+        if isinstance(node, dict):
+            if "product_id" in node and "name" in node:
+                products[node["product_id"]] = node["name"]
+            if "order_id" in node and isinstance(node["order_id"], int) and "error" not in node:
+                orders.add(node["order_id"])
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    for c in calls:
+        walk(c["result"])
+    parts = []
+    if products:
+        parts.append("products mentioned: " + "; ".join(f"id {i} = {n}" for i, n in products.items()))
+    if orders:
+        parts.append("orders looked up (customer already verified): " + ", ".join(map(str, sorted(orders))))
+    return " | ".join(parts)

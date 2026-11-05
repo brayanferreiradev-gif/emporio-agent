@@ -11,11 +11,21 @@ DATA_DIR = ROOT / "data"
 VAR_DIR = ROOT / "var"  # runtime state (sessions, hand-off tickets) — git-ignored
 STORE_TZ = ZoneInfo("America/Campo_Grande")
 
-DEFAULT_MODEL = "gemini-2.5-flash"
+# Free-tier Gemini models are frequently overloaded (503) and older ones get retired for new keys
+# (gemini-2.5-flash already returns 404), so the agent walks a chain: first healthy model wins.
+DEFAULT_MODEL = "gemini-3.6-flash"
+DEFAULT_FALLBACKS = "gemini-3.5-flash,gemini-3.1-flash-lite"
 
 
-def model_name() -> str:
-    return os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
+def thinking_level() -> str:
+    return os.getenv("GEMINI_THINKING", "low")
+
+
+def model_chain() -> list[str]:
+    primary = os.getenv("GEMINI_MODEL", DEFAULT_MODEL)
+    fallbacks = os.getenv("GEMINI_FALLBACK_MODELS", DEFAULT_FALLBACKS)
+    chain = [primary] + [m.strip() for m in fallbacks.split(",") if m.strip()]
+    return list(dict.fromkeys(chain))  # de-duplicate, keep order
 
 
 def now() -> datetime:
