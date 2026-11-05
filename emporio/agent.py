@@ -23,6 +23,7 @@ from .data import Store
 from .policies import PolicyIndex
 from .prompts import build_system_prompt
 from .session import Session
+from .text import detect_language
 from .tools import Tools
 
 MAX_STEPS = 6  # model <-> tool round trips per customer message
@@ -50,9 +51,10 @@ class Agent:
         notes = [m["notes"] for m in self.session.window() if m.get("notes")]
         return " | ".join(notes[-4:])  # most recent lookups only
 
-    def _config(self) -> types.GenerateContentConfig:
+    def _config(self, user_text: str = "") -> types.GenerateContentConfig:
         return types.GenerateContentConfig(
-            system_instruction=build_system_prompt(self.store, config.now(), self._context_notes()),
+            system_instruction=build_system_prompt(
+                self.store, config.now(), self._context_notes(), detect_language(user_text)),
             tools=self.tools.as_functions(),
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             temperature=0.3,
@@ -94,7 +96,7 @@ class Agent:
     def reply(self, user_text: str) -> Turn:
         contents = [types.Content(role=m["role"], parts=[types.Part(text=m["text"])]) for m in self.session.window()]
         contents.append(types.Content(role="user", parts=[types.Part(text=user_text)]))
-        cfg, calls, text = self._config(), [], ""
+        cfg, calls, text = self._config(user_text), [], ""
 
         for _ in range(MAX_STEPS):
             resp = self._generate(contents, cfg)

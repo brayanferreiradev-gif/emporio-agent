@@ -157,3 +157,12 @@ def test_general_returns_question_sees_defect_section(policies):
 def test_search_results_carry_instalment_hint(make_tools):
     top = make_tools().search_products(query="Takamine GD20")["results"][0]
     assert "12x de R$ 183,25" in top["instalments"]
+
+
+def test_language_detection():
+    from emporio.text import detect_language
+    assert detect_language("Hello, do you sell guitars?") == "en"
+    assert detect_language("¿Tienen guitarras? Hola") == "es"
+    assert detect_language("Quanto custa o Takamine GD20?") == "pt"
+    assert detect_language("oi") == "pt" and detect_language("🎸") == "pt" and detect_language("") == "pt"
+    assert detect_language("Pedido 8, meu email é ana@gmail.com") == "pt"
