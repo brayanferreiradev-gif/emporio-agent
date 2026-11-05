@@ -15,7 +15,7 @@ Dó:      O Takamine GD20 Dreadnought Natural custa R$ 2.199,00 (R$ 2.089,05 no 
 ```
 
 * **Conversas de exemplo:** [`examples/`](examples) (5 cenários roteirizados, gerados rodando o agente real — veja abaixo)
-* **Testes:** 30 testes determinísticos, sem precisar de chave de API (`pytest`)
+* **Testes:** 39 testes determinísticos, sem precisar de chave de API (`pytest`)
 
 ---
 
@@ -63,11 +63,11 @@ use `anacarol.ferreira@coldmail.com`), *"Me arrependi, posso devolver o pedido 7
  │        │                                                                               │
  │        ▼              chamada(s) de ferramenta                                         │
  │     Gemini  ───────────────────────────►  Ferramentas (emporio/tools.py)               │
- │        ▲                                   │  search_products · get_product_details    │
+ │        ▲                                   │  search_products · list_promotions        │
  │        └────────── resultados ◄────────────┤  get_payment_options · get_shipping_info  │
  │   (loop, no máx. 6 idas e vindas)          │  get_store_info · search_policies         │
  │                                            │  get_order_status · check_return_elig...  │
- │                                            └─ escalate_to_human                        │
+ │                                            └─ get_product_details · escalate_to_human  │
  └────────────────────────────────────────────────────────────────────────────────────────┘
         │                                         │                       │
         ▼                                         ▼                       ▼
@@ -79,7 +79,7 @@ use `anacarol.ferreira@coldmail.com`), *"Me arrependi, posso devolver o pedido 7
 |---|---|
 | `emporio/agent.py` | Loop de function calling, fallback de modelos, tentativas, notas de memória da conversa |
 | `emporio/prompts.py` | Persona, regras de fundamentação, guia de roteamento de ferramentas (dinâmico: data + visão do catálogo) |
-| `emporio/tools.py` | As 9 ferramentas que o modelo pode chamar; verificação de identidade; tickets de transferência |
+| `emporio/tools.py` | As 10 ferramentas que o modelo pode chamar; verificação de identidade; tickets de transferência |
 | `emporio/rules.py` | Regras de negócio em código puro: preço/PIX, parcelas, frete, horário, prazos de devolução |
 | `emporio/catalog.py` | Busca de produtos insensível a acentos/plural, com peso por campo |
 | `emporio/policies.py` | Busca BM25 no manual de políticas + tabela de sinônimos |
@@ -106,7 +106,7 @@ Descartei as alternativas de propósito:
 **As regras vivem no código, não no prompt.** Preço promocional, a regra "o desconto do PIX nunca acumula com promoção", parcelas
 mínimas, o limite de frete grátis, horário de funcionamento e as janelas de 7/30 dias de devolução são funções simples em `rules.py`.
 As ferramentas devolvem valores **já formatados** (`"R$ 5.519,08"`), então o modelo nunca faz conta nem cálculo de datas. Isso elimina a
-classe mais comum de erros de LLM e deixa o comportamento testável por unidade (30 testes).
+classe mais comum de erros de LLM e deixa o comportamento testável por unidade (39 testes).
 
 ### Modelo e provedor: API do Gemini, plano gratuito
 Considerei primeiro um modelo local de 7B via Ollama (grátis, privado). Na máquina de destino (GPU de notebook com 6 GB), um modelo 7B
@@ -205,8 +205,7 @@ Cada arquivo mostra as chamadas de ferramenta (🔧) abaixo de cada mensagem do 
 
 * **Latência e disponibilidade** dependem do plano gratuito do Gemini: as respostas levam ~3–15 s e a cadeia de fallback pode trocar de modelo entre turnos
   (as respostas continuam consistentes porque as regras estão no código, mas o tom pode variar um pouco).
-* **Sem avaliação automatizada do LLM.** O código determinístico é bem testado, mas o comportamento do modelo é verificado só pelas conversas de exemplo. Próximo passo: um pequeno
-  conjunto de ~50 conversas roteirizadas com asserções sobre as chamadas de ferramenta e um LLM-as-judge para o tom, rodando em CI.
+* **A avaliação do LLM é parcial.** `evals/battery.py` roda 134 cenários reais (catálogo, pagamentos, frete, horários, políticas, consulta de pedidos, devoluções, fora de escopo, injeção de prompt, outros idiomas) com verificações automáticas: ferramenta esperada chamada, frases proibidas ausentes e *todo valor em R$ da resposta precisa vir de uma ferramenta*. Na primeira rodada completa (118 cenários), 104 passaram, e as falhas geraram correções reais (lista de promoções, ordenação por preço, motivos inventados, notas vazadas, idioma). Depois das correções a **cota diária gratuita acabou**, então a nova rodada completa não pôde ser concluída; os cenários afetados foram refeitos individualmente em outros modelos Gemini. Próximo passo: rodada completa verde em CI e um LLM-as-judge para o tom.
 * **A recuperação é lexical.** Serve para 65 produtos e 10 seções do manual; eu adicionaria embeddings (busca híbrida) quando o catálogo chegar aos 300+ itens que o manual menciona.
 * **Frete fora de Campo Grande** não pode ser calculado; eu integraria as APIs de cotação dos Correios/Jadlog por CEP.
 * **A transferência para humano é um arquivo.** Uma versão real criaria um ticket no helpdesk/CRM, notificaria a equipe e coletaria o consentimento de contato de forma explícita.
@@ -241,6 +240,7 @@ emporio/            pacote do agente (veja a tabela na seção 2)
 data/               CSVs + store_policies.pdf (fonte) + store_policies.md (gerado)
 scripts/            ingest_policies.py, run_examples.py
 tests/              suíte pytest (offline)
+evals/              bateria de avaliação ao vivo (134 cenários, exige chave de API)
 examples/           conversas de exemplo geradas
 var/                estado em execução: sessões, tickets de transferência (ignorado pelo git)
 ```
