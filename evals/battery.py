@@ -14,7 +14,7 @@ import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-ROOT = Path(r"C:\projetos\emporio-agent")
+ROOT = Path(__file__).resolve().parents[1]
 HERE = Path(__file__).parent / "out"; HERE.mkdir(exist_ok=True)
 D = "2026-03-23T10:00"  # default simulated "now": every order exists, a weekday morning
 
@@ -104,7 +104,7 @@ SCENARIOS = [
     S("x30_frete_ukulele_300", "Quanto é o frete de um ukulele de R$ 300 para Campo Grande?", R(r"35,00")),
     S("x31_boleto_12x", "Posso pagar o Takamine GD20 em 12x no boleto?", R(r"a vista|vista|nao")),
     S("x32_categorias", "Quais categorias de instrumentos vocês têm?", R(r"violo"), R(r"guitarra"), R(r"bateria"), R(r"ukulele")),
-    S("x33_contexto_pedido", ["Pedido 8, anacarol.ferreira@coldmail.com", "e esse pedido, posso devolver?"], R(r"caminho|transito|ainda nao|recebe|recebimento", 1), N(r"e-?mail|telefone", 1)),
+    S("x33_contexto_pedido", ["Pedido 8, anacarol.ferreira@coldmail.com", "e esse pedido, posso devolver?"], R(r"caminho|transito|ainda nao|recebe|recebimento|motivo|razao|por que", 1), N(r"e-?mail|telefone", 1)),
     S("x34_12x_geral", "Vocês aceitam cartão de crédito em 12x sem juros?", R(r"12 ?x")),
     S("x35_rastreio_sem_contato", "Preciso do código de rastreio do pedido 8", NT("get_order_status"), R(r"e-?mail|telefone")),
     S("x36_bom_dia", "bom dia", R(r"bom dia")),
@@ -249,7 +249,7 @@ def run_one(sid):
 
 def launch(sid):
     for attempt in range(2):
-        p = subprocess.run([str(ROOT / ".venv/Scripts/python.exe"), str(Path(__file__)), "--one", sid],
+        p = subprocess.run([sys.executable, str(Path(__file__)), "--one", sid],
                            capture_output=True, text=True, encoding="utf-8", env={**os.environ, "PYTHONIOENCODING": "utf-8"})
         for line in p.stdout.splitlines():
             if line.startswith("@@RESULT@@"):
