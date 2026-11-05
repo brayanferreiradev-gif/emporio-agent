@@ -49,7 +49,8 @@ class Tools:
     # the callables handed to the model (their docstrings become the tool descriptions)
     def as_functions(self) -> list[Callable]:
         return [
-            self.search_products, self.get_product_details, self.get_payment_options, self.get_shipping_info,
+            self.search_products, self.list_promotions, self.get_product_details, self.get_payment_options,
+            self.get_shipping_info,
             self.get_store_info, self.search_policies, self.get_order_status, self.check_return_eligibility,
             self.escalate_to_human,
         ]
@@ -58,7 +59,8 @@ class Tools:
     def _view(self, p: Product, detailed: bool = False) -> dict:
         v = {"product_id": p.id, "name": p.name, "category": p.category, "availability": p.availability,
              **rules.price_info(self.store, p)}
-        v.pop("price_value", None)
+        inst = rules.installment_options(v.pop("price_value"))
+        v["instalments"] = f"até {inst['max_installments']}x de {inst['max_installments_value']} sem juros no cartão"
         if p.availability == "available":
             v["units_in_stock"] = p.stock
         if detailed:
@@ -68,7 +70,7 @@ class Tools:
         return v
 
     def search_products(self, query: str = "", category: str = "", brand: str = "",
-                        min_price: float = 0, max_price: float = 0) -> dict:
+                        min_price: float = 0, max_price: float = 0, sort_by: str = "relevance") -> dict:
         """Search the product catalogue (live prices, promotions and stock). Call this for ANY question about
         which instruments exist, prices, availability, options in a budget, or a specific model.
 
@@ -80,8 +82,13 @@ class Tools:
             brand: brand filter, e.g. "Yamaha".
             min_price: minimum price in BRL (0 = no minimum).
             max_price: maximum price in BRL the customer would pay, promotions included (0 = no maximum).
+            sort_by: "relevance" (default), "price_asc" (cheapest first) or "price_desc" (most expensive first).
+                Use price_desc/price_asc for "the most expensive/cheapest ..." questions.
         """
         found = catalog.search(self.store, query, category, brand, min_price or None, max_price or None)
+        if sort_by in ("price_asc", "price_desc"):
+            found = sorted(found, key=lambda x: rules.price_info(self.store, x[0])["price_value"],
+                           reverse=sort_by == "price_desc")
         sellable = [p for p, _ in found if p.sellable]
         unavailable = [p for p, _ in found if not p.sellable]
         out: dict = {"total_available_matches": len(sellable), "results": [self._view(p) for p in sellable[:8]]}
@@ -100,6 +107,19 @@ class Tools:
         if not sellable and not unavailable:
             out["note"] = out.get("note", "No product matched.")
         return out
+
+    def list_promotions(self) -> dict:
+        """List EVERY promotion that is active right now (product, discount %, original and promotional price).
+        Call this for "what is on sale?", "any promotions?" or "any discounts today?" questions. An empty list
+        means there are no active promotions."""
+        items = []
+        for p in self.store.products.values():
+            promo = self.store.active_promotion(p.id)
+            if promo and p.sellable:
+                items.append(self._view(p))
+        items.sort(key=lambda v: v["name"])
+        return {"active_promotions": len(items), "items": items,
+                "note": "Promotional prices exclude the 5% PIX discount. Past campaigns (e.g. Black Friday) are not active."}
 
     def get_product_details(self, product_id: int) -> dict:
         """Full details (price, promotion, stock, specs, description) of ONE product by its id, as returned by
@@ -133,7 +153,7 @@ class Tools:
         """Look up the store's official policy manual: returns/refunds/exchanges, warranty, payment rules,
         shipping rules, promotions rules, privacy (LGPD), what to do with complaints, scope of the store.
         Call this BEFORE answering any 'what is the rule/policy/can I...' question. Write `question` in Portuguese."""
-        hits = self.policies.search(question, k=3)
+        hits = self.policies.search(question, k=3, expand=True)
         if not hits:
             return {"found": False, "note": "No relevant policy found. Do not invent one — offer a hand-off to the team."}
         return {"found": True, "internal_document": True,

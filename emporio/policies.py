@@ -19,6 +19,9 @@ from .text import tokens
 CANONICAL_FIXES = [
     ("(67) 3321-4500", "(67) 3341-4444"),            # WhatsApp number differs between §1.2 and §7
     ("contato@empóriodamusica.com.br", "contato@emporiodamusica.com.br"),  # accent in e-mail domain
+    # The summary table says "minimum instalment R$ 100" but §3.1 is more specific; use §3.1 everywhere.
+    ("|Cartão de Crédito|Até 12x sem juros|Parcela mínima de R$ 100,00|",
+     "|Cartão de Crédito|Até 12x sem juros|Parcela mínima: R$ 50 (até 3x), R$ 80 (4x a 6x), R$ 100 (7x a 12x) — ver 3.1|"),
 ]
 
 # query-word prefix -> extra manual vocabulary
@@ -26,7 +29,7 @@ SYNONYMS = {
     ("devol", "arrepend", "troc", "reembols", "estorn", "cancel"): "devolução arrependimento troca reembolso",
     ("fret", "entreg", "envi", "praz", "correi", "motoboy"): "frete entrega prazo",
     ("pag", "parcel", "cart", "pix", "bolet", "credit", "debit", "juros", "vista"): "pagamento parcelamento pix cartão boleto",
-    ("horari", "abre", "fecha", "funcion", "abert", "sabad", "doming", "feriad"): "horário funcionamento",
+    ("horari", "abre", "fecha", "funcionam", "abert", "sabad", "doming", "feriad"): "horário funcionamento",
     ("enderec", "local", "onde", "cnpj", "telefon", "whats", "email", "contat"): "empresa dados endereço telefone",
     ("garant", "defeit", "quebr", "estrag", "conserto"): "garantia defeito troca",
     ("promo", "descont", "ofert", "black", "liquid"): "promoções descontos",
@@ -90,7 +93,22 @@ class PolicyIndex:
                 qt += tokens(extra)
         return qt
 
-    def search(self, query: str, k: int = 3) -> list[tuple[Section, float]]:
+    def search(self, query: str, k: int = 3, expand: bool = False) -> list[tuple[Section, float]]:
+        hits = self._rank(query, k)
+        if not expand:
+            return hits
+        # Broad questions ("política de troca") must see ALL subsections of the matched chapter
+        # (4.1 regret, 4.2 defect, 4.3 preference, 4.4 exclusions), not just the top lexical hits.
+        seen = {s.ref for s, _ in hits}
+        for sec, score in list(hits[:2]):
+            major = sec.ref.split(".")[0]
+            for other in self.sections:
+                if other.ref.split(".")[0] == major and other.ref not in seen and len(hits) < 7:
+                    hits.append((other, score * 0.5))
+                    seen.add(other.ref)
+        return hits
+
+    def _rank(self, query: str, k: int) -> list[tuple[Section, float]]:
         q = self._expand(query)
         n, scored = len(self._docs), []
         for sec, doc in zip(self.sections, self._docs):

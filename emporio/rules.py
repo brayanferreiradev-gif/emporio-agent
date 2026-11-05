@@ -78,7 +78,11 @@ def payment_options(store: Store, p: Product, quantity: int = 1) -> dict:
         "credit_card": installment_options(total),
         "debit_card": f"à vista, {brl(total)} (todas as bandeiras)",
         "boleto": f"à vista, {brl(total)} (compensação em até 3 dias úteis)",
-        "combine_payment_methods": total > 2000,
+        "combine_payment_methods_allowed": total > 2000,
+        "combine_payment_methods_rule": (
+            "Splitting a purchase across payment methods (e.g. PIX + card) is allowed only for purchases above "
+            f"R$ 2.000,00. This purchase is {brl(total)}, so it "
+            + ("IS" if total > 2000 else "is NOT") + " allowed. State exactly this reason; do not invent others."),
     }
     if "promotion" in info:
         out["pix"] = f"à vista, {brl(total)} (preço promocional; sem desconto extra de PIX)"

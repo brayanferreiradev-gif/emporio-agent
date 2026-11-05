@@ -103,3 +103,57 @@ def test_policy_retrieval_routes_to_right_section(policies):
 def test_policy_text_has_single_phone_number(policies):
     text = " ".join(s.text for s in policies.sections)
     assert "3321-4500" not in text and "3341-4444" in text
+
+
+def test_list_promotions_returns_every_active_one(make_tools):
+    out = make_tools().list_promotions()
+    names = " ".join(i["name"] for i in out["items"])
+    assert out["active_promotions"] == 4
+    for expected in ("Ohana CK-20", "Crafter HT-100", "Taylor 110e", "Kalani KAL-700T"):
+        assert expected in names
+    assert all("promotion" in i for i in out["items"])
+
+
+def test_sort_by_price(make_tools):
+    t = make_tools()
+    top = t.search_products(sort_by="price_desc")["results"][0]
+    cheapest = t.search_products(category="ukuleles", sort_by="price_asc")["results"][0]
+    assert "Nord Synth 2 Pro" in top["name"] and "Shelby SU-21S" in cheapest["name"]
+
+
+def test_combined_payment_rule_is_explained(make_tools):
+    t = make_tools()
+    small = t.get_payment_options(81)  # Yamaha C40, R$ 599,90
+    big = t.get_payment_options(95)    # Takamine GD20, R$ 2.199,00
+    assert small["combine_payment_methods_allowed"] is False and "NOT" in small["combine_payment_methods_rule"]
+    assert big["combine_payment_methods_allowed"] is True
+
+
+def test_whatsapp_bold_conversion():
+    from emporio.agent import whatsapp_format
+    assert whatsapp_format("O **Yamaha F310** custa **R$ 699,90**") == "O *Yamaha F310* custa *R$ 699,90*"
+    assert whatsapp_format("*já certo*") == "*já certo*"
+
+
+def test_internal_notes_never_reach_the_customer():
+    from emporio.agent import whatsapp_format
+    leaked = "O Yamaha custa R$ 699,90.\n\n[internal notes product_id: 87]"
+    assert whatsapp_format(leaked) == "O Yamaha custa R$ 699,90."
+    assert whatsapp_format("Ok [internal notes search_products: category=Guitarras]") == "Ok"
+
+
+def test_notes_go_to_system_prompt_not_to_messages(store):
+    from datetime import datetime
+    from emporio.prompts import build_system_prompt
+    p = build_system_prompt(store, datetime(2026, 3, 23, 10), "products mentioned: id 87 = Yamaha F310")
+    assert "id 87 = Yamaha F310" in p and "Already looked up" in p
+
+
+def test_general_returns_question_sees_defect_section(policies):
+    refs = [s.ref for s, _ in policies.search("política de troca e devolução", 3, expand=True)]
+    assert "4.2" in refs  # manufacturing-defect swap (30 days) must not be dropped
+
+
+def test_search_results_carry_instalment_hint(make_tools):
+    top = make_tools().search_products(query="Takamine GD20")["results"][0]
+    assert "12x de R$ 183,25" in top["instalments"]

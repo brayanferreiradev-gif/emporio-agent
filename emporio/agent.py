@@ -9,10 +9,12 @@ safe handling of tool exceptions.
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
+import httpx
 from google import genai
 from google.genai import errors, types
 
@@ -44,9 +46,13 @@ class Agent:
         self._fns = {f.__name__: f for f in self.tools.as_functions()}
 
     # ------------------------------------------------------------------ model access
+    def _context_notes(self) -> str:
+        notes = [m["notes"] for m in self.session.window() if m.get("notes")]
+        return " | ".join(notes[-4:])  # most recent lookups only
+
     def _config(self) -> types.GenerateContentConfig:
         return types.GenerateContentConfig(
-            system_instruction=build_system_prompt(self.store, config.now()),
+            system_instruction=build_system_prompt(self.store, config.now(), self._context_notes()),
             tools=self.tools.as_functions(),
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             temperature=0.3,
@@ -67,8 +73,11 @@ class Agent:
                     if getattr(e, "code", None) not in (404, 429, 500, 503, 504):
                         raise
                     last = e
-                    if getattr(e, "code", None) == 404:
-                        break
+                    if getattr(e, "code", None) in (404, 429):
+                        break  # retrying the same model will not help: quota/retired -> next model
+                    time.sleep(1.5 * (attempt + 1))
+                except httpx.HTTPError as e:  # timeouts, dropped connections: transient too
+                    last = e
                     time.sleep(1.5 * (attempt + 1))
         raise last  # type: ignore[misc]
 
@@ -83,11 +92,7 @@ class Agent:
 
     # ------------------------------------------------------------------ conversation
     def reply(self, user_text: str) -> Turn:
-        contents = [
-            types.Content(role=m["role"], parts=[types.Part(text=m["text"] + (
-                f"\n[internal notes, never show to the customer: {m['notes']}]" if m.get("notes") else ""))])
-            for m in self.session.window()
-        ]
+        contents = [types.Content(role=m["role"], parts=[types.Part(text=m["text"])]) for m in self.session.window()]
         contents.append(types.Content(role="user", parts=[types.Part(text=user_text)]))
         cfg, calls, text = self._config(), [], ""
 
@@ -109,11 +114,21 @@ class Agent:
                 results.append(types.Part.from_function_response(name=fc.name, response={"result": result}))
             contents.append(types.Content(role="user", parts=results))
 
-        text = text or FALLBACK
+        # WhatsApp bold is *x*; the model sometimes slips into Markdown **x** despite the prompt.
+        text = whatsapp_format(text) or FALLBACK
         self.session.add("user", user_text)
         self.session.add("model", text, notes=_memo(calls))
         self.session.save()
         return Turn(text, calls)
+
+
+_LEAK_RE = re.compile(r"\s*\[(?:internal )?notes?\b[^\]]*\]", re.I)
+
+
+def whatsapp_format(text: str) -> str:
+    """Final clean-up of a reply: Markdown **bold** -> WhatsApp *bold*, and remove any internal-note
+    markers the model might echo (they must never reach the customer)."""
+    return re.sub(r"\*\*(.+?)\*\*", r"*\1*", _LEAK_RE.sub("", text)).strip()
 
 
 def _memo(calls: list[dict]) -> str:
