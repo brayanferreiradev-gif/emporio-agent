@@ -22,7 +22,7 @@ Dó:      O Takamine GD20 Dreadnought Natural custa R$ 2.199,00 (R$ 2.089,05 no 
 Requirements: Python 3.10+ and a free Gemini API key ([get one here](https://aistudio.google.com/apikey), no credit card).
 
 ```bash
-git clone <this-repo> && cd emporio-agent
+git clone https://github.com/brayanferreiradev-gif/emporio-agent.git && cd emporio-agent
 python -m venv .venv
 # Windows: .venv\Scripts\activate      macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
