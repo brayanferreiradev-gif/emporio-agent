@@ -1,5 +1,7 @@
 # Empório da Música — Customer Support Agent
 
+> 🇺🇸 English · 🇧🇷 [Português](README.pt-BR.md)
+
 A text-chat agent for **Empório da Música**, a (fictional) musical-instrument store in Campo Grande/MS.
 It answers customers as "Dó", a friendly store assistant, and decides on its own **when to look up live data**
 (prices, promotions, stock, orders) and **when to consult the policy manual** (returns, payments, shipping, warranty).
