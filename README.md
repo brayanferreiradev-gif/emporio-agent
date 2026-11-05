@@ -228,7 +228,7 @@ How the work was split:
   turns and re-searched (→ internal notes in the history); a test that I (the assistant) wrote with a wrong expectation (599 ÷ 6 ≥ R$ 80 → 6 instalments, not 5) was caught by the test run.
 * **Verification:** every business rule has a unit test; the example transcripts come from the real agent, unedited.
 
-The commit history shows the actual progression (scaffold → data/ingestion → rules/tools/agent → resilience → tests → examples → docs). Commits co-authored with Claude say so in their trailer.
+The commit history shows the actual progression (scaffold → data/ingestion → rules/tools/agent → resilience → tests → examples → docs).
 
 ---
 
